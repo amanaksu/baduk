@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f1a14">
+<title>웹 바둑</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23dcb35c'/%3E%3Ccircle cx='11' cy='12' r='7' fill='%23111'/%3E%3Ccircle cx='21' cy='20' r='7' fill='%23fff' stroke='%23999'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f4efe6; --panel:#fffaf1; --text:#2b2218; --muted:#7a6a55; --line:#e3d7c2;
+    --accent:#b5651d; --accent-text:#fff; --btn:#efe5d3; --btn-text:#2b2218;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#17130f; --panel:#221c16; --text:#efe6d8; --muted:#a8977f; --line:#3a3026;
+      --accent:#d98a3d; --accent-text:#1a120a; --btn:#2f271f; --btn-text:#efe6d8;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
+    -webkit-tap-highlight-color:transparent}
+  body{min-height:100dvh;display:flex;flex-direction:column;align-items:center}
+  header{width:100%;max-width:760px;display:flex;align-items:center;justify-content:space-between;padding:10px 16px 4px}
+  header h1{font-size:20px;margin:0;letter-spacing:-.02em}
+  header .sub{font-size:12px;color:var(--muted);margin-left:8px;font-weight:400}
+  main{width:100%;max-width:760px;padding:0 16px 16px;display:flex;flex-direction:column;align-items:center;gap:10px}
+  #status{width:100%;display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+  .player{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:var(--panel);
+    border:2px solid transparent;min-width:0;transition:border-color .2s}
+  .player.active{border-color:var(--accent)}
+  #pW{justify-content:flex-end;text-align:right}
+  .dot{width:18px;height:18px;border-radius:50%;flex:none}
+  .dot.b{background:radial-gradient(circle at 35% 35%,#666,#111)}
+  .dot.w{background:radial-gradient(circle at 35% 35%,#fff,#cfcfcf);border:1px solid #999}
+  .pinfo{display:flex;flex-direction:column;min-width:0}
+  .pname{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .caps{font-size:12px;color:var(--muted)}
+  #msgBox{text-align:center;font-size:13px;line-height:1.35;min-width:96px}
+  #msg{font-weight:600}
+  #sub{color:var(--muted);font-size:12px;min-height:16px}
+  #boardWrap{width:min(100%, calc(100dvh - 230px));min-width:260px;aspect-ratio:1/1;position:relative}
+  canvas{display:block;width:100%;border-radius:6px;touch-action:manipulation;
+    box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  #controls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%;max-width:560px}
+  button{font:inherit;font-size:15px;padding:11px 8px;border-radius:10px;border:none;background:var(--btn);color:var(--btn-text);cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  button.primary{background:var(--accent);color:var(--accent-text);font-weight:600}
+  button.ghost{background:transparent;border:1px solid var(--line);padding:7px 12px;font-size:14px}
+  #scorePanel{width:100%;max-width:560px;background:var(--panel);border-radius:12px;padding:12px 14px;font-size:14px}
+  #scorePanel p{margin:0 0 8px;color:var(--muted);font-size:13px}
+  #scoreText{line-height:1.6;margin-bottom:10px}
+  #scoreText b{font-size:16px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  dialog{border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--text);width:min(92vw,420px)}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog form{padding:18px}
+  dialog h2{margin:0 0 12px;font-size:18px}
+  .field{margin-bottom:14px}
+  .field>label.t{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg label{flex:1;min-width:64px}
+  .seg input{position:absolute;opacity:0;pointer-events:none}
+  .seg span{display:block;text-align:center;padding:9px 6px;border-radius:9px;background:var(--btn);font-size:14px;cursor:pointer}
+  .seg input:checked+span{background:var(--accent);color:var(--accent-text);font-weight:600}
+  .seg input:disabled+span{opacity:.4}
+  .check{display:flex;align-items:center;gap:8px;font-size:14px;margin:6px 0}
+  .hint{font-size:12px;color:var(--muted);margin:4px 0 0}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:rgba(20,16,12,.92);color:#fff;
+    padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;pointer-events:none;transition:all .25s;max-width:90vw;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (max-width:420px){ .pname{font-size:13px} #msgBox{min-width:80px} button{font-size:14px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>바둑<span class="sub" id="modeLabel"></span></h1>
+  <button class="ghost" id="btnSettings" type="button">⚙ 설정</button>
+</header>
+<main>
+  <section id="status">
+    <div class="player" id="pB"><span class="dot b"></span><div class="pinfo"><span class="pname" id="nameB">흑</span><span class="caps">따낸 돌 <b id="capB">0</b></span></div></div>
+    <div id="msgBox"><div id="msg">흑 차례</div><div id="sub"></div></div>
+    <div class="player" id="pW"><div class="pinfo"><span class="pname" id="nameW">백</span><span class="caps">따낸 돌 <b id="capW">0</b></span></div><span class="dot w"></span></div>
+  </section>
+  <div id="boardWrap"><canvas id="board"></canvas></div>
+  <section id="controls">
+    <button id="btnPass" type="button">패스</button>
+    <button id="btnUndo" type="button">무르기</button>
+    <button id="btnResign" type="button">기권</button>
+    <button id="btnNew" type="button" class="primary">새 게임</button>
+  </section>
+  <section id="scorePanel" hidden>
+    <p>계가 중입니다. 판단이 틀린 사석은 돌을 탭해서 바꿀 수 있어요.</p>
+    <div id="scoreText"></div>
+    <div class="row2">
+      <button id="btnResume" type="button">계속 두기</button>
+      <button id="btnConfirm" type="button" class="primary">계가 확정</button>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="cfgForm">
+    <h2>새 게임 설정</h2>
+    <div class="field">
+      <label class="t">모드</label>
+      <div class="seg">
+        <label><input type="radio" name="mode" value="ai"><span>AI 대국</span></label>
+        <label><input type="radio" name="mode" value="pvp"><span>2인 대전</span></label>
+      </div>
+    </div>
+    <div class="field" id="fLevel">
+      <label class="t">AI 난이도</label>
+      <div class="seg">
+        <label><input type="radio" name="level" value="easy"><span>쉬움</span></label>
+        <label><input type="radio" name="level" value="normal"><span>보통</span></label>
+        <label><input type="radio" name="level" value="hard"><span>어려움</span></label>
+        <label><input type="radio" name="level" value="vhard"><span>매우 어려움</span></label>
+      </div>
+    </div>
+    <div class="field" id="fColor">
+      <label class="t">내 돌</label>
+      <div class="seg">
+        <label><input type="radio" name="human" value="1"><span>흑 (먼저)</span></label>
+        <label><input type="radio" name="human" value="2"><span>백 (나중)</span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="t">판 크기</label>
+      <div class="seg">
+        <label><input type="radio" name="n" value="9"><span>9×9</span></label>
+        <label><input type="radio" name="n" value="13"><span>13×13</span></label>
+        <label><input type="radio" name="n" value="19"><span>19×19</span></label>
+      </div>
+      <p class="hint">AI는 9×9에서 가장 강하고, 19×19에서는 생각 시간이 더 걸려요.</p>
+    </div>
+    <div class="field">
+      <label class="t">덤 (백에게)</label>
+      <div class="seg">
+        <label><input type="radio" name="komi" value="0.5"><span>0.5</span></label>
+        <label><input type="radio" name="komi" value="6.5"><span>6.5</span></label>
+        <label><input type="radio" name="komi" value="7.5"><span>7.5</span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" name="coords"> 좌표 표시</label>
+      <label class="check"><input type="checkbox" name="confirm"> 터치할 때 두 번 탭해서 착수 (실수 방지)</label>
+    </div>
+    <div class="row2">
+      <button value="cancel" type="submit">취소</button>
+      <button value="ok" type="submit" class="primary">시작</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast"></div>
+
+<!-- ===================== 엔진 (규칙 + AI) ===================== -->
+<!-- 이 스크립트는 메인 화면과 Web Worker 양쪽에서 그대로 사용됩니다. -->
+<script id="engine">
+var Go = (function () {
+  'use strict';
+
+  /* ---------- 판 기하 정보 ---------- */
+  function Geom(n) {
+    this.n = n; this.size = n * n;
+    this.nb = new Array(this.size); this.dg = new Array(this.size);
+    this.line = new Int8Array(this.size);
+    for (var i = 0; i < this.size; i++) {
+      var x = i % n, y = (i / n) | 0, a = [], d = [];
+      if (x > 0) a.push(i - 1); if (x < n - 1) a.push(i + 1);
+      if (y > 0) a.push(i - n); if (y < n - 1) a.push(i + n);
+      if (x > 0 && y > 0) d.push(i - n - 1); if (x < n - 1 && y > 0) d.push(i - n + 1);
+      if (x > 0 && y < n - 1) d.push(i + n - 1); if (x < n - 1 && y < n - 1) d.push(i + n + 1);
+      this.nb[i] = a; this.dg[i] = d;
+      this.line[i] = Math.min(x, y, n - 1 - x, n - 1 - y) + 1;
+    }
+    this.mark = new Int32Array(this.size); this.lmark = new Int32Array(this.size); this.stamp = 0;
+    this.stones = new Int32Array(this.size); this.cnt = 0; this.libs = 0; this.lastLib = -1;
+    this.buf = new Int32Array(this.size);
+  }
+  var geoms = {};
+  function geom(n) { return geoms[n] || (geoms[n] = new Geom(n)); }
+
+  /* ---------- 국면 ---------- */
+  function Pos(n) { this.n = n; this.cells = new Int8Array(n * n); this.ko = -1; this.toPlay = 1; }
+  Pos.prototype.clone = function () {
+    var p = new Pos(this.n); p.cells.set(this.cells); p.ko = this.ko; p.toPlay = this.toPlay; return p;
+  };
+
+  /* 그룹 정보: 돌 목록(g.stones[0..cnt)), 활로 수. maxLibs>0 이면 그 수에 도달하는 즉시 중단 */
+  function groupInfo(g, cells, pt, maxLibs) {
+    var color = cells[pt], st = ++g.stamp, stones = g.stones, mark = g.mark, lmark = g.lmark;
+    var cnt = 0, libs = 0, lastLib = -1, i = 0;
+    mark[pt] = st; stones[cnt++] = pt;
+    while (i < cnt) {
+      var nb = g.nb[stones[i++]];
+      for (var k = 0; k < nb.length; k++) {
+        var q = nb[k], c = cells[q];
+        if (c === 0) {
+          if (lmark[q] !== st) {
+            lmark[q] = st; libs++; lastLib = q;
+            if (maxLibs && libs >= maxLibs) { g.cnt = cnt; g.libs = libs; g.lastLib = lastLib; return libs; }
+          }
+        } else if (c === color && mark[q] !== st) { mark[q] = st; stones[cnt++] = q; }
+      }
+    }
+    g.cnt = cnt; g.libs = libs; g.lastLib = lastLib; return libs;
+  }
+
+  function isLegal(g, pos, pt) {
+    var cells = pos.cells;
+    if (cells[pt] !== 0 || pt === pos.ko) return false;
+    var me = pos.toPlay, op = 3 - me, nb = g.nb[pt], k;
+    for (k = 0; k < nb.length; k++) if (cells[nb[k]] === 0) return true;
+    cells[pt] = me;
+    var ok = false;
+    for (k = 0; k < nb.length; k++) {
+      var c = cells[nb[k]];
+      if (c === op) { if (groupInfo(g, cells, nb[k], 1) === 0) { ok = true; break; } }
+      else if (c === me) { if (groupInfo(g, cells, nb[k], 1) > 0) { ok = true; break; } }
+    }
+    cells[pt] = 0;
+    return ok;
+  }
+
+  function legality(g, pos, pt) {
+    if (pos.cells[pt] !== 0) return 'occupied';
+    if (pt === pos.ko) return 'ko';
+    return isLegal(g, pos, pt) ? 'ok' : 'suicide';
+  }
+
+  /* 착수. pt<0 은 패스. 반환: 따낸 돌 수, 불법이면 -1 */
+  function play(g, pos, pt) {
+    var me = pos.toPlay, op = 3 - me;
+    if (pt < 0) { pos.ko = -1; pos.toPlay = op; return 0; }
+    if (!isLegal(g, pos, pt)) return -1;
+    var cells = pos.cells, nb = g.nb[pt], captured = 0, capPt = -1;
+    cells[pt] = me;
+    for (var k = 0; k < nb.length; k++) {
+      var q = nb[k];
+      if (cells[q] === op && groupInfo(g, cells, q, 1) === 0) {
+        for (var i = 0; i < g.cnt; i++) cells[g.stones[i]] = 0;
+        captured += g.cnt; capPt = q;
+      }
+    }
+    pos.ko = -1;
+    if (captured === 1) {
+      groupInfo(g, cells, pt, 0);
+      if (g.cnt === 1 && g.libs === 1) pos.ko = capPt;
+    }
+    pos.toPlay = op;
+    return captured;
+  }
+
+  /* 자기 눈인지 (메우면 손해인 자리) */
+  function isEye(g, cells, pt, color) {
+    var nb = g.nb[pt], k;
+    for (k = 0; k < nb.length; k++) if (cells[nb[k]] !== color) return false;
+    var dg = g.dg[pt], bad = 0, op = 3 - color;
+    for (k = 0; k < dg.length; k++) if (cells[dg[k]] === op) bad++;
+    return nb.length < 4 ? bad === 0 : bad <= 1;
+  }
+
+  /* minStones 이상 크기의 그룹이 자충(단수)이 되는 수인지 */
+  function selfAtari(g, pos, pt, minStones) {
+    var cells = pos.cells, me = pos.toPlay, op = 3 - me, nb = g.nb[pt], emp = 0, k;
+    for (k = 0; k < nb.length; k++) if (cells[nb[k]] === 0) emp++;
+    if (emp >= 2) return false;
+    cells[pt] = me;
+    var res = false, cap = false;
+    for (k = 0; k < nb.length; k++) {
+      if (cells[nb[k]] === op && groupInfo(g, cells, nb[k], 1) === 0) { cap = true; break; }
+    }
+    if (!cap) { var l = groupInfo(g, cells, pt, 2); if (l <= 1 && g.cnt >= minStones) res = true; }
+    cells[pt] = 0;
+    return res;
+  }
+
+  function genMoves(g, pos) {
+    var out = [], cells = pos.cells, me = pos.toPlay;
+    for (var i = 0; i < g.size; i++) {
+      if (cells[i] === 0 && !isEye(g, cells, i, me) && isLegal(g, pos, i)) out.push(i);
+    }
+    return out;
+  }
+
+  /* 휴리스틱 평가 (보통 난이도 + 탐색의 사전 지식) */
+  function evalMove(g, pos, pt, last, moveNum) {
+    var cells = pos.cells, me = pos.toPlay, op = 3 - me, nb = g.nb[pt], n = g.n;
+    var s = 0, capture = 0, saved = 0, k, l;
+    for (k = 0; k < nb.length; k++) {
+      var q = nb[k], c = cells[q];
+      if (c === op) { l = groupInfo(g, cells, q, 3); if (l === 1) capture += g.cnt; else if (l === 2) s += 0.8; }
+      else if (c === me) { l = groupInfo(g, cells, q, 2); if (l === 1) saved += g.cnt; }
+    }
+    cells[pt] = me;
+    var libsAfter = groupInfo(g, cells, pt, 4), myCnt = g.cnt;
+    cells[pt] = 0;
+    if (capture > 0) s += 4 + capture * 3;
+    if (saved > 0) {
+      if (libsAfter >= 3 || capture > 0) s += 4 + saved * 2;
+      else if (libsAfter === 2) s += 1 + saved * 0.5;
+      else s -= 1;
+    }
+    if (libsAfter === 1 && capture === 0) s -= 3 + myCnt * 1.5;
+    else if (libsAfter === 2 && capture === 0 && myCnt > 3) s -= 0.5;
+
+    var line = g.line[pt], early = moveNum < g.size * 0.12;
+    if (line === 1) s -= (capture || saved) ? 0 : 2.5;
+    else if (line === 2) s -= early ? 1 : 0.2;
+    else if (early && (line === 3 || line === 4)) s += 1;
+
+    var x = pt % n, y = (pt / n) | 0;
+    if (last >= 0) {
+      var d = Math.abs(last % n - x) + Math.abs(((last / n) | 0) - y);
+      if (d <= 2) s += 0.6;
+    }
+    if (early && n >= 13) {
+      var near = 0;
+      for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+        var xx = x + dx, yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < n && yy < n && cells[yy * n + xx]) near++;
+      }
+      if (near === 0) s += 0.8;
+    }
+    return s;
+  }
+
+  /* 플레이아웃용 전술 수: 단수된 직전 수 따내기 / 단수된 내 돌 살리기 */
+  function tactical(g, pos, last) {
+    var cells = pos.cells, me = pos.toPlay, op = 3 - me, l, lib;
+    if (cells[last] === op) {
+      l = groupInfo(g, cells, last, 2);
+      if (l === 1) { lib = g.lastLib; if (isLegal(g, pos, lib)) return lib; }
+    }
+    var nb = g.nb[last];
+    for (var k = 0; k < nb.length; k++) {
+      var q = nb[k];
+      if (cells[q] === me && groupInfo(g, cells, q, 2) === 1) {
+        lib = g.lastLib;
+        if (isLegal(g, pos, lib)) {
+          cells[lib] = me; var after = groupInfo(g, cells, lib, 3); cells[lib] = 0;
+          if (after >= 2) return lib;
+        }
+      }
+    }
+    return -1;
+  }
+
+  /* 계가(집 + 돌, 중국식) : 흑 - 백 - 덤. own 배열이 있으면 소유 누적 */
+  function areaScore(g, cells, komi, own) {
+    var s = 0;
+    for (var i = 0; i < g.size; i++) {
+      var c = cells[i], o = 0;
+      if (c === 1) o = 1; else if (c === 2) o = -1;
+      else {
+        var nb = g.nb[i], b = 0, w = 0;
+        for (var k = 0; k < nb.length; k++) { var cc = cells[nb[k]]; if (cc === 1) b = 1; else if (cc === 2) w = 1; }
+        if (b && !w) o = 1; else if (w && !b) o = -1;
+      }
+      s += o; if (own) own[i] += o;
+    }
+    return s - komi;
+  }
+
+  function playout(g, p, firstCol, firstIdx, idx, last, passes, maxMoves) {
+    var cells = p.cells, size = g.size, buf = g.buf, moves = 0;
+    while (passes < 2 && moves < maxMoves) {
+      var me = p.toPlay, mv = -1;
+      if (last >= 0) mv = tactical(g, p, last);
+      if (mv < 0) {
+        var k = 0;
+        for (var i = 0; i < size; i++) if (cells[i] === 0) buf[k++] = i;
+        while (k > 0) {
+          var r = (Math.random() * k) | 0, pt = buf[r];
+          buf[r] = buf[--k];
+          if (isEye(g, cells, pt, me)) continue;
+          if (!isLegal(g, p, pt)) continue;
+          if (selfAtari(g, p, pt, 2)) continue;
+          mv = pt; break;
+        }
+      }
+      if (mv < 0) { play(g, p, -1); passes++; last = -1; }
+      else {
+        play(g, p, mv); passes = 0; last = mv;
+        if (!firstCol[mv]) { firstCol[mv] = me; firstIdx[mv] = idx; }
+      }
+      idx++; moves++;
+    }
+  }
+
+  /* ---------- MCTS (UCT + RAVE + 휴리스틱 사전지식) ---------- */
+  var PRIOR_N = 10, EXPL = 0.2, RAVE_B = 1 / 2000;
+  function Node(move, color) {
+    this.move = move; this.color = color; this.children = null;
+    this.N = 0; this.W = 0; this.pN = 0; this.pW = 0; this.v = 0; this.rN = 0; this.rW = 0;
+  }
+  function expand(g, p, node, last, moveNum) {
+    var moves = genMoves(g, p), me = p.toPlay, ch = [];
+    for (var i = 0; i < moves.length; i++) {
+      var c = new Node(moves[i], me), e = evalMove(g, p, moves[i], last, moveNum);
+      var q = 0.5 + e * 0.05; if (q < 0.05) q = 0.05; if (q > 0.95) q = 0.95;
+      c.N = c.pN = PRIOR_N; c.W = c.pW = PRIOR_N * q; ch.push(c);
+    }
+    if (!ch.length) { var pc = new Node(-1, me); pc.N = pc.pN = 1; pc.W = pc.pW = 0.5; ch.push(pc); }
+    node.children = ch;
+  }
+  function select(node) {
+    var best = null, bv = -1e9, lg = Math.log(node.N + 1), ch = node.children;
+    for (var i = 0; i < ch.length; i++) {
+      var c = ch[i], q = c.W / c.N, v;
+      if (c.rN > 0) {
+        var beta = c.rN / (c.rN + c.N + c.rN * c.N * RAVE_B);
+        v = (1 - beta) * q + beta * (c.rW / c.rN);
+      } else v = q;
+      v += EXPL * Math.sqrt(lg / c.N);
+      if (v > bv) { bv = v; best = c; }
+    }
+    return best;
+  }
+  function search(g, pos, o) {
+    var size = g.size, root = new Node(-2, 3 - pos.toPlay), own = new Float64Array(size);
+    var firstCol = new Int8Array(size), firstIdx = new Int32Array(size), path = [];
+    expand(g, pos, root, o.last, o.moveNum);
+    var t0 = Date.now(), sims = 0, maxMoves = size * 3;
+    while (true) {
+      if ((sims & 7) === 0 && Date.now() - t0 >= o.timeMs) break;
+      var p = pos.clone(), node = root, idx = 0, last = o.last, passes = o.oppPassed ? 1 : 0;
+      firstCol.fill(0); path.length = 0; path.push(root);
+      while (passes < 2) {
+        if (!node.children) { if (node.v < 1) break; expand(g, p, node, last, o.moveNum + idx); }
+        var c = select(node);
+        if (c.move >= 0) {
+          play(g, p, c.move);
+          if (!firstCol[c.move]) { firstCol[c.move] = c.color; firstIdx[c.move] = idx; }
+          passes = 0;
+        } else { play(g, p, -1); passes++; }
+        last = c.move; idx++; node = c; path.push(c);
+      }
+      if (passes < 2) playout(g, p, firstCol, firstIdx, idx, last, passes, maxMoves);
+      var winner = areaScore(g, p.cells, o.komi, own) > 0 ? 1 : 2;
+      for (var i = path.length - 1; i >= 0; i--) {
+        var nd = path[i]; nd.N++; nd.v++; if (nd.color === winner) nd.W++;
+        if (nd.children) {
+          var chs = nd.children;
+          for (var j = 0; j < chs.length; j++) {
+            var cc = chs[j], m = cc.move;
+            if (m >= 0 && firstCol[m] === cc.color && firstIdx[m] >= i) { cc.rN++; if (cc.color === winner) cc.rW++; }
+          }
+        }
+      }
+      sims++;
+    }
+    if (sims) for (var k = 0; k < size; k++) own[k] /= sims;
+    return { root: root, own: own, sims: sims };
+  }
+
+  function estimate(g, pos, komi, count, timeMs) {
+    var own = new Float64Array(g.size), fc = new Int8Array(g.size), fi = new Int32Array(g.size);
+    var t0 = Date.now(), k = 0;
+    while (k < count && (k < 8 || Date.now() - t0 < timeMs)) {
+      var p = pos.clone(); playout(g, p, fc, fi, 0, -1, 0, g.size * 3);
+      areaScore(g, p.cells, komi, own); k++;
+    }
+    for (var i = 0; i < g.size; i++) own[i] /= k || 1;
+    return own;
+  }
+  function ownScore(own, komi) { var s = 0; for (var i = 0; i < own.length; i++) s += own[i]; return s - komi; }
+  function settled(g, own, pt) {
+    var o = own[pt]; if (Math.abs(o) < 0.9) return false;
+    var sg = o > 0 ? 1 : -1, nb = g.nb[pt];
+    for (var k = 0; k < nb.length; k++) if (own[nb[k]] * sg < 0.9) return false;
+    return true;
+  }
+  function bestEval(g, pos, cands, req, noise) {
+    var best = cands[0], bv = -1e9;
+    for (var i = 0; i < cands.length; i++) {
+      var v = evalMove(g, pos, cands[i], req.last, req.moveNum) + Math.random() * noise;
+      if (v > bv) { bv = v; best = cands[i]; }
+    }
+    return best;
+  }
+
+  var TIMES = { hard: { 9: 1200, 13: 1800, 19: 2500 }, vhard: { 9: 4000, 13: 6000, 19: 8000 } };
+
+  function decide(req) {
+    var n = req.n, g = geom(n), pos = new Pos(n);
+    pos.cells.set(req.cells); pos.ko = req.ko; pos.toPlay = req.toPlay;
+    var me = pos.toPlay, sign = me === 1 ? 1 : -1, size = g.size, komi = req.komi;
+    var moves = genMoves(g, pos);
+    if (!moves.length) return { move: -1 };
+    var late = req.oppPassed || req.moveNum > size * 0.4;
+
+    if (req.level === 'easy' || req.level === 'normal') {
+      var cands = moves;
+      if (late) {
+        var own0 = estimate(g, pos, komi, size <= 81 ? 200 : 120, req.timeMs || 700);
+        if (req.oppPassed && ownScore(own0, komi) * sign > 0) return { move: -1 };
+        cands = moves.filter(function (pt) { return !settled(g, own0, pt); });
+        if (!cands.length) return { move: -1 };
+      }
+      if (req.level === 'easy') {
+        if (Math.random() < 0.3) return { move: bestEval(g, pos, cands, req, 0.5) };
+        var pool = cands.filter(function (pt) { return g.line[pt] > 1 && !selfAtari(g, pos, pt, 2); });
+        var arr = pool.length ? pool : cands;
+        return { move: arr[(Math.random() * arr.length) | 0] };
+      }
+      return { move: bestEval(g, pos, cands, req, 1.2) };
+    }
+
+    var tm = req.timeMs || (TIMES[req.level] && TIMES[req.level][n]) || 3000;
+    var r = search(g, pos, { timeMs: tm, komi: komi, last: req.last, oppPassed: req.oppPassed, moveNum: req.moveNum });
+    var own = r.own;
+    if (req.oppPassed && ownScore(own, komi) * sign > 0) return { move: -1, sims: r.sims };
+    var ch = r.root.children.slice().sort(function (a, b) { return (b.N - b.pN) - (a.N - a.pN); });
+    var pick = null;
+    for (var i = 0; i < ch.length; i++) {
+      if (ch[i].move < 0) break;
+      if (late && settled(g, own, ch[i].move)) continue;
+      pick = ch[i]; break;
+    }
+    if (!pick) return { move: -1, sims: r.sims };
+    var real = pick.N - pick.pN, wr = real > 0 ? (pick.W - pick.pW) / real : 0.5;
+    if (wr < 0.05 && real >= 300 && req.moveNum > size * 0.3) return { resign: true, move: -1, winrate: wr, sims: r.sims };
+    return { move: pick.move, winrate: wr, sims: r.sims };
+  }
+
+  function handle(req) {
+    if (req.type === 'own') {
+      var g = geom(req.n), pos = new Pos(req.n);
+      pos.cells.set(req.cells); pos.toPlay = req.toPlay || 1;
+      return { own: Array.from(estimate(g, pos, req.komi, req.count || 400, req.timeMs || 1500)) };
+    }
+    return decide(req);
+  }
+
+  return { geom: geom, Pos: Pos, play: play, legality: legality, isLegal: isLegal,
+           groupInfo: groupInfo, genMoves: genMoves, handle: handle };
+})();
+</script>
+
+<!-- ===================== 화면 / 게임 진행 ===================== -->
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('board'), ctx = canvas.getContext('2d');
+  var LEVEL = { easy: '쉬움', normal: '보통', hard: '어려움', vhard: '매우 어려움' };
+  var CNAME = { 1: '흑', 2: '백' };
+  var LETTERS = 'ABCDEFGHJKLMNOPQRST';
+
+  var cfg = { mode: 'ai', level: 'normal', human: 1, n: 19, komi: 6.5, coords: true,
+              confirm: window.matchMedia && matchMedia('(pointer: coarse)').matches };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem('baduk-cfg') || '{}')); } catch (e) {}
+  function saveCfg() { try { localStorage.setItem('baduk-cfg', JSON.stringify(cfg)); } catch (e) {} }
+
+  var S = null, geo = null, reqId = 0, hover = -1, pending = -1;
+  var W = 0, cell = 0, margin = 0;
+
+  /* ---------- 엔진 실행 (Web Worker, 실패 시 메인 스레드) ---------- */
+  var worker = null, workerOk = typeof Worker !== 'undefined', cbs = {};
+  var WORKER_MAIN = 'self.onmessage=function(e){var r;try{r=Go.handle(e.data);}catch(err){r={error:String(err)};}self.postMessage({id:e.data.id,res:r});};';
+  function getWorker() {
+    if (!workerOk) return null;
+    if (worker) return worker;
+    try {
+      var src = $('engine').textContent + '\n' + WORKER_MAIN;
+      var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      worker = new Worker(url);
+      worker.onmessage = function (e) {
+        var cb = cbs[e.data.id]; delete cbs[e.data.id];
+        if (cb) cb(e.data.res);
+      };
+      worker.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        workerOk = false; worker = null;
+        var pend = cbs; cbs = {};
+        for (var k in pend) pend[k].fallback();
+      };
+      return worker;
+    } catch (e) { workerOk = false; return null; }
+  }
+  function runEngine(req, cb) {
+    var fallback = function () { setTimeout(function () { cb(Go.handle(req)); }, 30); };
+    var wrapped = function (res) { if (!res || res.error) fallback(); else cb(res); };
+    wrapped.fallback = fallback;
+    var w = getWorker();
+    if (!w) { fallback(); return; }
+    cbs[req.id] = wrapped; w.postMessage(req);
+  }
+  function cancelAI() {
+    reqId++;
+    if (S) S.thinking = false;
+    if (worker && Object.keys(cbs).length) { worker.terminate(); worker = null; cbs = {}; }
+  }
+
+  /* ---------- 게임 상태 ---------- */
+  function newGame() {
+    cancelAI();
+    geo = Go.geom(cfg.n);
+    S = { n: cfg.n, pos: new Go.Pos(cfg.n), caps: [0, 0, 0], last: -1, passes: 0, moveNum: 0,
+          history: [], over: false, scoring: false, scoreBusy: false, dead: new Set(),
+          territory: null, result: null, thinking: false, winrate: null };
+    pending = -1; hover = -1;
+    $('scorePanel').hidden = true;
+    resize(); updateUI();
+    maybeAI();
+  }
+  function snapshot() {
+    return { cells: S.pos.cells.slice(), ko: S.pos.ko, toPlay: S.pos.toPlay, caps: S.caps.slice(),
+             last: S.last, passes: S.passes, moveNum: S.moveNum };
+  }
+  function restore(s) {
+    S.pos.cells.set(s.cells); S.pos.ko = s.ko; S.pos.toPlay = s.toPlay; S.caps = s.caps;
+    S.last = s.last; S.passes = s.passes; S.moveNum = s.moveNum;
+  }
+  function isAITurn() { return cfg.mode === 'ai' && S && !S.over && !S.scoring && S.pos.toPlay !== cfg.human; }
+
+  function tryMove(pt, quiet) {
+    var why = Go.legality(geo, S.pos, pt);
+    if (why !== 'ok') {
+      if (!quiet) toast(why === 'ko' ? '패: 바로 되따낼 수 없어요. 다른 곳에 한 수 두고 오세요.' :
+                         why === 'suicide' ? '자충수: 둘 수 없는 자리예요.' : '이미 돌이 있어요.');
+      return false;
+    }
+    S.history.push(snapshot());
+    var me = S.pos.toPlay, cap = Go.play(geo, S.pos, pt);
+    S.caps[me] += cap; S.last = pt; S.passes = 0; S.moveNum++;
+    return true;
+  }
+  function doPass() {
+    S.history.push(snapshot());
+    var who = S.pos.toPlay;
+    Go.play(geo, S.pos, -1); S.passes++; S.last = -1; S.moveNum++;
+    if (S.passes >= 2) { enterScoring(); return true; }
+    toast(CNAME[who] + (cfg.mode === 'ai' && who !== cfg.human ? '(AI)' : '') + '이 패스했어요.');
+    return false;
+  }
+
+  function humanPlay(pt) {
+    if (!S || S.over || S.thinking) return;
+    if (S.scoring) { toggleDead(pt); return; }
+    if (isAITurn()) return;
+    if (tryMove(pt)) { pending = -1; updateUI(); draw(); maybeAI(); }
+  }
+
+  function maybeAI() {
+    if (!isAITurn()) return;
+    S.thinking = true; updateUI();
+    var id = ++reqId, started = Date.now();
+    var req = { type: 'move', id: id, n: S.n, cells: S.pos.cells.slice(), ko: S.pos.ko, toPlay: S.pos.toPlay,
+                level: cfg.level, last: S.last, oppPassed: S.passes === 1, komi: cfg.komi, moveNum: S.moveNum };
+    runEngine(req, function (res) {
+      if (id !== reqId) return;
+      var wait = Math.max(0, 350 - (Date.now() - started));
+      setTimeout(function () {
+        if (id !== reqId) return;
+        S.thinking = false; applyAI(res);
+      }, wait);
+    });
+  }
+  function applyAI(r) {
+    if (r.winrate != null) S.winrate = r.winrate;
+    if (r.resign) {
+      S.over = true; S.result = 'AI가 기권했어요. 당신의 승리! 🎉';
+      updateUI(); draw(); return;
+    }
+    if (r.move < 0 || !tryMove(r.move, true)) {
+      if (doPass()) return;
+    }
+    updateUI(); draw();
+  }
+
+  function undo() {
+    if (!S || !S.history.length) return;
+    cancelAI();
+    if (S.scoring) { S.scoring = false; $('scorePanel').hidden = true; }
+    S.dead = new Set(); S.territory = null; S.over = false; S.result = null;
+    restore(S.history.pop());
+    if (cfg.mode === 'ai') {
+      while (S.history.length && S.pos.toPlay !== cfg.human) restore(S.history.pop());
+    }
+    pending = -1; updateUI(); draw(); maybeAI();
+  }
+
+  function resign() {
+    if (!S || S.over || S.scoring) return;
+    var loser = cfg.mode === 'ai' ? cfg.human : S.pos.toPlay;
+    if (!confirm((cfg.mode === 'ai' ? '' : CNAME[loser] + ' ') + '기권하시겠어요?')) return;
+    cancelAI();
+    S.over = true;
+    S.result = cfg.mode === 'ai' ? '기권했어요. AI 승리.' : CNAME[loser] + ' 기권 — ' + CNAME[3 - loser] + ' 승리!';
+    updateUI(); draw();
+  }
+
+  /* ---------- 계가 ---------- */
+  function enterScoring() {
+    cancelAI();
+    S.scoring = true; S.scoreBusy = true; S.dead = new Set(); S.territory = null;
+    $('scorePanel').hidden = false; $('scoreText').textContent = '사석 판정 중…';
+    updateUI(); draw();
+    var id = ++reqId;
+    runEngine({ type: 'own', id: id, n: S.n, cells: S.pos.cells.slice(), toPlay: S.pos.toPlay,
+                komi: cfg.komi, count: 400, timeMs: 1500 }, function (res) {
+      if (id !== reqId || !S.scoring) return;
+      S.scoreBusy = false;
+      markDead(res.own); computeScore(); updateUI(); draw();
+    });
+  }
+  function groupStones(pt) {
+    Go.groupInfo(geo, S.pos.cells, pt, 0);
+    return Array.from(geo.stones.subarray(0, geo.cnt));
+  }
+  function markDead(own) {
+    var size = S.n * S.n, seen = new Uint8Array(size), cells = S.pos.cells;
+    for (var i = 0; i < size; i++) {
+      if (!cells[i] || seen[i]) continue;
+      var st = groupStones(i), sum = 0;
+      st.forEach(function (p) { seen[p] = 1; sum += own[p]; });
+      var avg = sum / st.length;
+      if ((cells[i] === 1 && avg < -0.2) || (cells[i] === 2 && avg > 0.2)) st.forEach(function (p) { S.dead.add(p); });
+    }
+  }
+  function toggleDead(pt) {
+    if (S.scoreBusy || !S.pos.cells[pt]) return;
+    var st = groupStones(pt), isDead = S.dead.has(pt);
+    st.forEach(function (p) { if (isDead) S.dead.delete(p); else S.dead.add(p); });
+    computeScore(); updateUI(); draw();
+  }
+  function computeScore() {
+    var n = S.n, size = n * n, cells = S.pos.cells.slice(), deadB = 0, deadW = 0;
+    S.dead.forEach(function (p) { if (cells[p] === 1) deadB++; else if (cells[p] === 2) deadW++; cells[p] = 0; });
+    var terr = new Int8Array(size), seen = new Uint8Array(size), tB = 0, tW = 0;
+    for (var i = 0; i < size; i++) {
+      if (cells[i] || seen[i]) continue;
+      var region = [i], b = false, w = false; seen[i] = 1;
+      for (var k = 0; k < region.length; k++) {
+        geo.nb[region[k]].forEach(function (q) {
+          if (cells[q] === 1) b = true; else if (cells[q] === 2) w = true;
+          else if (!seen[q]) { seen[q] = 1; region.push(q); }
+        });
+      }
+      if (b && !w) { region.forEach(function (p) { terr[p] = 1; }); tB += region.length; }
+      else if (w && !b) { region.forEach(function (p) { terr[p] = 2; }); tW += region.length; }
+    }
+    var capB = S.caps[1] + deadW, capW = S.caps[2] + deadB;
+    S.territory = terr;
+    S.score = { tB: tB, tW: tW, capB: capB, capW: capW, black: tB + capB, white: tW + capW + cfg.komi };
+    var sc = S.score, diff = sc.black - sc.white;
+    $('scoreText').innerHTML =
+      '흑: 집 ' + tB + ' + 따낸 돌·사석 ' + capB + ' = <b>' + sc.black + '</b><br>' +
+      '백: 집 ' + tW + ' + 따낸 돌·사석 ' + capW + ' + 덤 ' + cfg.komi + ' = <b>' + sc.white + '</b><br>' +
+      '→ <b>' + (diff > 0 ? '흑 ' + diff : '백 ' + (-diff)) + '집 승</b>';
+  }
+  function confirmScore() {
+    if (!S.score || S.scoreBusy) return;
+    var diff = S.score.black - S.score.white, winner = diff > 0 ? 1 : 2, margin2 = Math.abs(diff);
+    S.scoring = false; S.over = true;
+    var who = CNAME[winner] + ' ' + margin2 + '집 승';
+    if (cfg.mode === 'ai') who += winner === cfg.human ? ' — 당신의 승리! 🎉' : ' — AI 승리';
+    S.result = who;
+    $('scorePanel').hidden = true;
+    updateUI(); draw();
+  }
+  function resumePlay() {
+    S.scoring = false; S.dead = new Set(); S.territory = null; S.passes = 0;
+    $('scorePanel').hidden = true; updateUI(); draw(); maybeAI();
+  }
+
+  /* ---------- 화면 ---------- */
+  function updateUI() {
+    if (!S) return;
+    var ai = cfg.mode === 'ai';
+    $('modeLabel').textContent = ai ? 'AI 대국 · ' + LEVEL[cfg.level] + ' · ' + S.n + '줄' : '2인 대전 · ' + S.n + '줄';
+    $('nameB').textContent = '흑' + (ai ? (cfg.human === 1 ? ' (나)' : ' (AI)') : '');
+    $('nameW').textContent = '백' + (ai ? (cfg.human === 2 ? ' (나)' : ' (AI)') : '');
+    $('capB').textContent = S.caps[1]; $('capW').textContent = S.caps[2];
+    var active = !S.over && !S.scoring;
+    $('pB').classList.toggle('active', active && S.pos.toPlay === 1);
+    $('pW').classList.toggle('active', active && S.pos.toPlay === 2);
+    var msg, sub = '';
+    if (S.over) msg = S.result;
+    else if (S.scoring) msg = '계가 중';
+    else if (S.thinking) { msg = 'AI 생각 중…'; sub = LEVEL[cfg.level]; }
+    else if (ai) { msg = '당신 차례'; sub = CNAME[cfg.human] + ' · ' + (S.moveNum + 1) + '수째'; }
+    else { msg = CNAME[S.pos.toPlay] + ' 차례'; sub = (S.moveNum + 1) + '수째'; }
+    if (!S.over && !S.scoring && !S.thinking && ai && S.winrate != null && (cfg.level === 'hard' || cfg.level === 'vhard'))
+      sub = 'AI 예상 승률 ' + Math.round(S.winrate * 100) + '%';
+    $('msg').textContent = msg; $('sub').textContent = sub;
+    var canAct = !S.over && !S.scoring && !S.thinking && !isAITurn();
+    $('btnPass').disabled = !canAct;
+    $('btnResign').disabled = S.over || S.scoring;
+    $('btnUndo').disabled = !S.history.length;
+    $('btnConfirm').disabled = S.scoreBusy;
+  }
+
+  function resize() {
+    if (!S) return;
+    var cssW = $('boardWrap').clientWidth, dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(cssW * dpr); canvas.height = canvas.width;
+    canvas.style.height = cssW + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    W = cssW;
+    var pad = cfg.coords ? 0.95 : 0.6;
+    cell = W / (S.n - 1 + 2 * pad); margin = cell * pad;
+    draw();
+  }
+  function hoshi(n) {
+    if (n === 19) { var a = [3, 9, 15], r = []; a.forEach(function (x) { a.forEach(function (y) { r.push([x, y]); }); }); return r; }
+    if (n === 13) return [[3, 3], [3, 9], [9, 3], [9, 9], [6, 6]];
+    if (n === 9) return [[2, 2], [2, 6], [6, 2], [6, 6], [4, 4]];
+    return [];
+  }
+  function px(i) { return margin + i * cell; }
+  function drawStone(x, y, color, alpha) {
+    var r = cell * 0.47;
+    ctx.save(); ctx.globalAlpha = alpha;
+    if (alpha === 1) { ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = cell * 0.1; ctx.shadowOffsetX = cell * 0.04; ctx.shadowOffsetY = cell * 0.06; }
+    var g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+    if (color === 1) { g.addColorStop(0, '#6a6a6a'); g.addColorStop(1, '#0d0d0d'); }
+    else { g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#cdcdcd'); }
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = 'transparent';
+    if (color === 2) { ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.stroke(); }
+    ctx.restore();
+  }
+  function draw() {
+    if (!S || !W) return;
+    var n = S.n, cells = S.pos.cells, end = px(n - 1);
+    var bg = ctx.createLinearGradient(0, 0, W, W);
+    bg.addColorStop(0, '#e2bd6c'); bg.addColorStop(1, '#d4a957');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, W);
+    ctx.strokeStyle = '#3b2a14'; ctx.lineWidth = Math.max(1, cell * 0.035);
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var p = Math.round(px(i)) + 0.5;
+      ctx.moveTo(px(0), p); ctx.lineTo(end, p);
+      ctx.moveTo(p, px(0)); ctx.lineTo(p, end);
+    }
+    ctx.stroke();
+    ctx.lineWidth = Math.max(1.5, cell * 0.06); ctx.strokeRect(px(0), px(0), end - px(0), end - px(0));
+    ctx.fillStyle = '#3b2a14';
+    hoshi(n).forEach(function (h) { ctx.beginPath(); ctx.arc(px(h[0]), px(h[1]), Math.max(2, cell * 0.11), 0, Math.PI * 2); ctx.fill(); });
+    if (cfg.coords) {
+      ctx.fillStyle = 'rgba(59,42,20,.8)';
+      ctx.font = '600 ' + Math.max(9, cell * 0.36) + 'px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      var o = margin * 0.5;
+      for (i = 0; i < n; i++) {
+        ctx.fillText(LETTERS[i], px(i), o); ctx.fillText(LETTERS[i], px(i), W - o);
+        ctx.fillText(String(n - i), o, px(i)); ctx.fillText(String(n - i), W - o, px(i));
+      }
+    }
+    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
+      var pt = y * n + x, c = cells[pt];
+      if (c) drawStone(px(x), px(y), c, S.dead.has(pt) && (S.scoring || S.over) ? 0.45 : 1);
+    }
+    if (S.territory && (S.scoring || S.over)) {
+      var sq = cell * 0.32;
+      for (pt = 0; pt < n * n; pt++) {
+        var t = S.territory[pt]; if (!t) continue;
+        ctx.fillStyle = t === 1 ? '#111' : '#fafafa';
+        ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1;
+        ctx.fillRect(px(pt % n) - sq / 2, px((pt / n) | 0) - sq / 2, sq, sq);
+        if (t === 2) ctx.strokeRect(px(pt % n) - sq / 2, px((pt / n) | 0) - sq / 2, sq, sq);
+      }
+    }
+    if (S.last >= 0 && !S.scoring) {
+      var lc = cells[S.last];
+      ctx.strokeStyle = lc === 1 ? '#fff' : '#111'; ctx.lineWidth = Math.max(1.5, cell * 0.07);
+      ctx.beginPath(); ctx.arc(px(S.last % n), px((S.last / n) | 0), cell * 0.22, 0, Math.PI * 2); ctx.stroke();
+    }
+    var ghost = pending >= 0 ? pending : hover;
+    if (ghost >= 0 && !S.over && !S.scoring && !S.thinking && !isAITurn() && cells[ghost] === 0) {
+      drawStone(px(ghost % n), px((ghost / n) | 0), S.pos.toPlay, pending >= 0 ? 0.7 : 0.4);
+      if (pending >= 0) {
+        ctx.strokeStyle = '#d0451b'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(px(ghost % n), px((ghost / n) | 0), cell * 0.5, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+  function ptFromEvent(e) {
+    var r = canvas.getBoundingClientRect(), n = S.n;
+    var i = Math.round((e.clientX - r.left - margin) / cell), j = Math.round((e.clientY - r.top - margin) / cell);
+    if (i < 0 || j < 0 || i >= n || j >= n) return -1;
+    return j * n + i;
+  }
+
+  var toastTimer = null;
+  function toast(t) {
+    var el = $('toast'); el.textContent = t; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  /* ---------- 이벤트 ---------- */
+  canvas.addEventListener('pointerup', function (e) {
+    if (!S) return;
+    var pt = ptFromEvent(e); if (pt < 0) return;
+    if (S.scoring) { toggleDead(pt); return; }
+    if (S.over || S.thinking || isAITurn()) return;
+    var needConfirm = cfg.confirm && e.pointerType !== 'mouse';
+    if (needConfirm && pending !== pt) {
+      if (S.pos.cells[pt] !== 0) return;
+      pending = pt; draw(); return;
+    }
+    humanPlay(pt);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!S || e.pointerType !== 'mouse') return;
+    var pt = ptFromEvent(e); if (pt !== hover) { hover = pt; draw(); }
+  });
+  canvas.addEventListener('pointerleave', function () { if (hover !== -1) { hover = -1; draw(); } });
+
+  $('btnPass').onclick = function () {
+    if (!S || S.over || S.scoring || S.thinking || isAITurn()) return;
+    pending = -1;
+    if (!doPass()) { updateUI(); draw(); maybeAI(); }
+  };
+  $('btnUndo').onclick = undo;
+  $('btnResign').onclick = resign;
+  $('btnConfirm').onclick = confirmScore;
+  $('btnResume').onclick = resumePlay;
+
+  var dlg = $('dlg'), form = $('cfgForm');
+  function syncDlg() {
+    var pvp = form.mode.value === 'pvp';
+    form.querySelectorAll('#fLevel input, #fColor input').forEach(function (el) { el.disabled = pvp; });
+  }
+  function openSettings() {
+    form.mode.value = cfg.mode; form.level.value = cfg.level; form.human.value = String(cfg.human);
+    form.n.value = String(cfg.n); form.komi.value = String(cfg.komi);
+    form.coords.checked = cfg.coords; form.confirm.checked = cfg.confirm;
+    syncDlg();
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+  form.addEventListener('change', syncDlg);
+  dlg.addEventListener('close', function () {
+    if (dlg.returnValue !== 'ok') return;
+    cfg.mode = form.mode.value; cfg.level = form.level.value; cfg.human = +form.human.value;
+    cfg.n = +form.n.value; cfg.komi = +form.komi.value;
+    cfg.coords = form.coords.checked; cfg.confirm = form.confirm.checked;
+    saveCfg(); newGame();
+  });
+  $('btnSettings').onclick = openSettings;
+  $('btnNew').onclick = openSettings;
+
+  window.addEventListener('resize', function () { resize(); });
+  newGame();
+})();
+</script>
+</body>
+</html>
