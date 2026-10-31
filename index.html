@@ -80,9 +80,9 @@
 </header>
 <main>
   <section id="status">
-    <div class="player" id="pB"><span class="dot b"></span><div class="pinfo"><span class="pname" id="nameB">흑</span><span class="caps">따낸 돌 <b id="capB">0</b></span></div></div>
+    <div class="player" id="pB"><span class="dot b"></span><div class="pinfo"><span class="pname" id="nameB">흑</span><span class="caps">따낸 돌 <b id="capB">0</b><span id="tgtB"></span></span></div></div>
     <div id="msgBox"><div id="msg">흑 차례</div><div id="sub"></div></div>
-    <div class="player" id="pW"><div class="pinfo"><span class="pname" id="nameW">백</span><span class="caps">따낸 돌 <b id="capW">0</b></span></div><span class="dot w"></span></div>
+    <div class="player" id="pW"><div class="pinfo"><span class="pname" id="nameW">백</span><span class="caps">따낸 돌 <b id="capW">0</b><span id="tgtW"></span></span></div><span class="dot w"></span></div>
   </section>
   <div id="boardWrap"><canvas id="board"></canvas></div>
   <section id="controls">
@@ -105,7 +105,24 @@
   <form method="dialog" id="cfgForm">
     <h2>새 게임 설정</h2>
     <div class="field">
-      <label class="t">모드</label>
+      <label class="t">게임 방식</label>
+      <div class="seg">
+        <label><input type="radio" name="rule" value="territory"><span>집짓기</span></label>
+        <label><input type="radio" name="rule" value="capture"><span>따내기</span></label>
+      </div>
+      <p class="hint" id="ruleHint"></p>
+    </div>
+    <div class="field" id="fTarget">
+      <label class="t">따내기 목표 — 이만큼 먼저 따내면 승리</label>
+      <div class="seg">
+        <label><input type="radio" name="capTarget" value="1"><span>1개</span></label>
+        <label><input type="radio" name="capTarget" value="3"><span>3개</span></label>
+        <label><input type="radio" name="capTarget" value="5"><span>5개</span></label>
+        <label><input type="radio" name="capTarget" value="10"><span>10개</span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="t">상대</label>
       <div class="seg">
         <label><input type="radio" name="mode" value="ai"><span>AI 대국</span></label>
         <label><input type="radio" name="mode" value="pvp"><span>2인 대전</span></label>
@@ -134,9 +151,9 @@
         <label><input type="radio" name="n" value="13"><span>13×13</span></label>
         <label><input type="radio" name="n" value="19"><span>19×19</span></label>
       </div>
-      <p class="hint">AI는 9×9에서 가장 강하고, 19×19에서는 생각 시간이 더 걸려요.</p>
+      <p class="hint">AI는 9×9에서 가장 강해요. 따내기는 9×9를 추천해요.</p>
     </div>
-    <div class="field">
+    <div class="field" id="fKomi">
       <label class="t">덤 (백에게)</label>
       <div class="seg">
         <label><input type="radio" name="komi" value="0.5"><span>0.5</span></label>
@@ -164,10 +181,13 @@ var Go = (function () {
 
   /* ---------- 판 기하 정보 ---------- */
   function Geom(n) {
-    this.n = n; this.size = n * n;
-    this.nb = new Array(this.size); this.dg = new Array(this.size);
-    this.line = new Int8Array(this.size);
-    for (var i = 0; i < this.size; i++) {
+    var size = n * n;
+    this.n = n; this.size = size;
+    this.nb = new Array(size); this.dg = new Array(size);
+    this.nb8 = new Int32Array(size * 8);
+    this.line = new Int8Array(size);
+    var D8 = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+    for (var i = 0; i < size; i++) {
       var x = i % n, y = (i / n) | 0, a = [], d = [];
       if (x > 0) a.push(i - 1); if (x < n - 1) a.push(i + 1);
       if (y > 0) a.push(i - n); if (y < n - 1) a.push(i + n);
@@ -175,13 +195,55 @@ var Go = (function () {
       if (x > 0 && y < n - 1) d.push(i + n - 1); if (x < n - 1 && y < n - 1) d.push(i + n + 1);
       this.nb[i] = a; this.dg[i] = d;
       this.line[i] = Math.min(x, y, n - 1 - x, n - 1 - y) + 1;
+      for (var k = 0; k < 8; k++) {
+        var xx = x + D8[k][0], yy = y + D8[k][1];
+        this.nb8[i * 8 + k] = (xx < 0 || yy < 0 || xx >= n || yy >= n) ? -1 : yy * n + xx;
+      }
     }
-    this.mark = new Int32Array(this.size); this.lmark = new Int32Array(this.size); this.stamp = 0;
-    this.stones = new Int32Array(this.size); this.cnt = 0; this.libs = 0; this.lastLib = -1;
-    this.buf = new Int32Array(this.size);
+    this.mark = new Int32Array(size); this.lmark = new Int32Array(size); this.stamp = 0;
+    this.stones = new Int32Array(size); this.cnt = 0; this.libs = 0; this.lastLib = -1;
+    this.buf = new Int32Array(size); this.tmp = new Int32Array(size); this.cand = new Int32Array(size * 2);
   }
   var geoms = {};
   function geom(n) { return geoms[n] || (geoms[n] = new Geom(n)); }
+
+  /* ---------- 3x3 패턴 (MoGo 계열: 젖힘, 끊음, 변 패턴) ---------- */
+  // X,O = 돌, x = X 아님, o = O 아님, . = 빈 곳, ? = 아무거나, ' ' = 판 밖. 가운데가 착점.
+  var PAT_SRC = [
+    ['XOX', '...', '???'], ['XO.', '...', '?.?'], ['XO?', 'X..', 'x.?'], ['.O.', 'X..', '...'],
+    ['XO?', 'O.o', '?o?'], ['XO?', 'O.X', '???'], ['?X?', 'O.O', 'ooo'], ['OX?', 'o.O', '???'],
+    ['X.?', 'O.?', '   '], ['OX?', 'X.O', '   '], ['?X?', 'x.O', '   '], ['?XO', 'x.x', '   '],
+    ['?OX', 'X.O', '   ']
+  ];
+  var PAT = new Uint8Array(65536);
+  (function () {
+    var POS = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2]];
+    var CH = { '.': [0], 'X': [1], 'O': [2], ' ': [3], '?': [0, 1, 2, 3], 'x': [0, 2, 3], 'o': [0, 1, 3] };
+    var SW = { X: 'O', O: 'X', x: 'o', o: 'x' };
+    function rot(p) { var o = []; for (var r = 0; r < 3; r++) { var s = ''; for (var c = 0; c < 3; c++) s += p[2 - c][r]; o.push(s); } return o; }
+    function flip(p) { return p.map(function (s) { return s.split('').reverse().join(''); }); }
+    function swap(p) { return p.map(function (s) { return s.replace(/[XOxo]/g, function (ch) { return SW[ch]; }); }); }
+    PAT_SRC.forEach(function (p0) {
+      var vars = [];
+      [p0, flip(p0)].forEach(function (p) {
+        for (var r = 0; r < 4; r++) { vars.push(p, swap(p)); p = rot(p); }
+      });
+      vars.forEach(function (v) {
+        var codes = [0];
+        for (var k = 0; k < 8; k++) {
+          var opts = CH[v[POS[k][1]][POS[k][0]]], nc = [];
+          for (var a = 0; a < codes.length; a++) for (var b = 0; b < opts.length; b++) nc.push(codes[a] | (opts[b] << (2 * k)));
+          codes = nc;
+        }
+        for (var c = 0; c < codes.length; c++) PAT[codes[c]] = 1;
+      });
+    });
+  })();
+  function pat3(g, cells, pt) {
+    var code = 0, b = pt * 8, nb8 = g.nb8;
+    for (var k = 0; k < 8; k++) { var q = nb8[b + k]; code |= (q < 0 ? 3 : cells[q]) << (2 * k); }
+    return code;
+  }
 
   /* ---------- 국면 ---------- */
   function Pos(n) { this.n = n; this.cells = new Int8Array(n * n); this.ko = -1; this.toPlay = 1; }
@@ -286,13 +348,13 @@ var Go = (function () {
     return out;
   }
 
-  /* 휴리스틱 평가 (보통 난이도 + 탐색의 사전 지식) */
-  function evalMove(g, pos, pt, last, moveNum) {
+  /* 휴리스틱 평가 (탐색의 사전 지식) */
+  function evalMove(g, pos, pt, last, moveNum, capMode) {
     var cells = pos.cells, me = pos.toPlay, op = 3 - me, nb = g.nb[pt], n = g.n;
-    var s = 0, capture = 0, saved = 0, k, l;
+    var s = 0, capture = 0, saved = 0, atari = 0, k, l;
     for (k = 0; k < nb.length; k++) {
       var q = nb[k], c = cells[q];
-      if (c === op) { l = groupInfo(g, cells, q, 3); if (l === 1) capture += g.cnt; else if (l === 2) s += 0.8; }
+      if (c === op) { l = groupInfo(g, cells, q, 3); if (l === 1) capture += g.cnt; else if (l === 2) { s += 0.8; atari += g.cnt; } }
       else if (c === me) { l = groupInfo(g, cells, q, 2); if (l === 1) saved += g.cnt; }
     }
     cells[pt] = me;
@@ -306,6 +368,22 @@ var Go = (function () {
     }
     if (libsAfter === 1 && capture === 0) s -= 3 + myCnt * 1.5;
     else if (libsAfter === 2 && capture === 0 && myCnt > 3) s -= 0.5;
+    if (capMode) {
+      // 따내기: 무작위 시뮬레이션이 변을 과대평가하므로 사전지식으로 보정
+      if (atari && libsAfter >= 2) s += 1.5;
+      if (libsAfter === 2 && capture === 0) s -= 1;
+      if (libsAfter >= 3) s += 0.5;
+      if (!capture && !saved && !atari) {
+        if (g.line[pt] === 1) s -= 3;
+        else if (g.line[pt] === 2 && moveNum < g.size * 0.3) s -= 1;
+      }
+      var px0 = pt % n, py0 = (pt / n) | 0, close = 0;
+      for (var yy0 = Math.max(0, py0 - 2); yy0 <= Math.min(n - 1, py0 + 2); yy0++)
+        for (var xx0 = Math.max(0, px0 - 2); xx0 <= Math.min(n - 1, px0 + 2); xx0++)
+          if (cells[yy0 * n + xx0]) close++;
+      if (moveNum > 0) s += close ? 0.7 : -1.5;
+    }
+    if (PAT[pat3(g, cells, pt)]) s += 1;
 
     var line = g.line[pt], early = moveNum < g.size * 0.12;
     if (line === 1) s -= (capture || saved) ? 0 : 2.5;
@@ -328,23 +406,62 @@ var Go = (function () {
     return s;
   }
 
-  /* 플레이아웃용 전술 수: 단수된 직전 수 따내기 / 단수된 내 돌 살리기 */
-  function tactical(g, pos, last) {
-    var cells = pos.cells, me = pos.toPlay, op = 3 - me, l, lib;
-    if (cells[last] === op) {
-      l = groupInfo(g, cells, last, 2);
-      if (l === 1) { lib = g.lastLib; if (isLegal(g, pos, lib)) return lib; }
+  /* ---------- 플레이아웃 정책 ---------- */
+  function pickCand(g, pos, nc, checkSelfAtari) {
+    var cand = g.cand, cells = pos.cells, me = pos.toPlay;
+    while (nc > 0) {
+      var r = (Math.random() * nc) | 0, q = cand[r];
+      cand[r] = cand[--nc];
+      if (cells[q] !== 0 || isEye(g, cells, q, me) || !isLegal(g, pos, q)) continue;
+      if (checkSelfAtari && selfAtari(g, pos, q, 2)) continue;
+      return q;
     }
-    var nb = g.nb[last];
-    for (var k = 0; k < nb.length; k++) {
-      var q = nb[k];
-      if (cells[q] === me && groupInfo(g, cells, q, 2) === 1) {
-        lib = g.lastLib;
+    return -1;
+  }
+
+  /* 직전 수 주변: 단수된 상대 돌 따내기, 단수된 내 돌 살리기(달아나기 / 공격 돌 따내기) */
+  function heurCapture(g, pos, last) {
+    var cells = pos.cells, me = pos.toPlay, op = 3 - me, nb = g.nb[last], cand = g.cand, tmp = g.tmp, nc = 0;
+    for (var k = -1; k < nb.length; k++) {
+      var q = k < 0 ? last : nb[k], c = cells[q];
+      if (c === op) {
+        if (groupInfo(g, cells, q, 2) === 1) cand[nc++] = g.lastLib;
+      } else if (c === me) {
+        if (groupInfo(g, cells, q, 2) !== 1) continue;
+        var lib = g.lastLib, cnt = g.cnt, i, j;
+        for (i = 0; i < cnt; i++) tmp[i] = g.stones[i];
+        for (i = 0; i < cnt; i++) {
+          var nn = g.nb[tmp[i]];
+          for (j = 0; j < nn.length; j++) {
+            if (cells[nn[j]] === op && groupInfo(g, cells, nn[j], 2) === 1) cand[nc++] = g.lastLib;
+          }
+        }
         if (isLegal(g, pos, lib)) {
           cells[lib] = me; var after = groupInfo(g, cells, lib, 3); cells[lib] = 0;
-          if (after >= 2) return lib;
+          if (after >= 2) cand[nc++] = lib;
         }
       }
+    }
+    return nc ? pickCand(g, pos, nc, false) : -1;
+  }
+
+  function heurPattern(g, pos, last) {
+    var cells = pos.cells, cand = g.cand, nb8 = g.nb8, b = last * 8, nc = 0;
+    for (var k = 0; k < 8; k++) {
+      var q = nb8[b + k];
+      if (q >= 0 && cells[q] === 0 && PAT[pat3(g, cells, q)]) cand[nc++] = q;
+    }
+    return nc ? pickCand(g, pos, nc, true) : -1;
+  }
+
+  function randomMove(g, pos) {
+    var cells = pos.cells, buf = g.buf, me = pos.toPlay, k = 0, size = g.size;
+    for (var i = 0; i < size; i++) if (cells[i] === 0) buf[k++] = i;
+    while (k > 0) {
+      var r = (Math.random() * k) | 0, pt = buf[r];
+      buf[r] = buf[--k];
+      if (isEye(g, cells, pt, me) || !isLegal(g, pos, pt) || selfAtari(g, pos, pt, 2)) continue;
+      return pt;
     }
     return -1;
   }
@@ -365,44 +482,55 @@ var Go = (function () {
     return s - komi;
   }
 
-  function playout(g, p, firstCol, firstIdx, idx, last, passes, maxMoves) {
-    var cells = p.cells, size = g.size, buf = g.buf, moves = 0;
-    while (passes < 2 && moves < maxMoves) {
-      var me = p.toPlay, mv = -1;
-      if (last >= 0) mv = tactical(g, p, last);
-      if (mv < 0) {
-        var k = 0;
-        for (var i = 0; i < size; i++) if (cells[i] === 0) buf[k++] = i;
-        while (k > 0) {
-          var r = (Math.random() * k) | 0, pt = buf[r];
-          buf[r] = buf[--k];
-          if (isEye(g, cells, pt, me)) continue;
-          if (!isLegal(g, p, pt)) continue;
-          if (selfAtari(g, p, pt, 2)) continue;
-          mv = pt; break;
-        }
+  /* 시뮬레이션 상태: RAVE 기록, 따낸 돌 수, 승부 */
+  function Sim(size) {
+    this.firstCol = new Int8Array(size); this.firstIdx = new Int32Array(size);
+    this.caps = [0, 0, 0]; this.target = 0; this.winner = 0;
+  }
+  Sim.prototype.reset = function (caps, target) {
+    this.firstCol.fill(0); this.caps[1] = caps[1]; this.caps[2] = caps[2]; this.target = target; this.winner = 0;
+  };
+  /* 착수 + 기록. 따내기 목표에 도달하면 winner 설정 */
+  function simPlay(g, p, sim, mv, idx) {
+    var me = p.toPlay, cap = play(g, p, mv);
+    if (mv >= 0 && !sim.firstCol[mv]) { sim.firstCol[mv] = me; sim.firstIdx[mv] = idx; }
+    if (sim.target && cap > 0) { sim.caps[me] += cap; if (sim.caps[me] >= sim.target) sim.winner = me; }
+  }
+
+  function playout(g, p, sim, idx, last, passes, maxMoves) {
+    var moves = 0;
+    while (passes < 2 && moves < maxMoves && !sim.winner) {
+      var mv = -1;
+      if (last >= 0) {
+        if (Math.random() < 0.9) mv = heurCapture(g, p, last);
+        if (mv < 0 && Math.random() < 0.95) mv = heurPattern(g, p, last);
       }
+      if (mv < 0) mv = randomMove(g, p);
       if (mv < 0) { play(g, p, -1); passes++; last = -1; }
-      else {
-        play(g, p, mv); passes = 0; last = mv;
-        if (!firstCol[mv]) { firstCol[mv] = me; firstIdx[mv] = idx; }
-      }
+      else { simPlay(g, p, sim, mv, idx); passes = 0; last = mv; }
       idx++; moves++;
     }
   }
 
-  /* ---------- MCTS (UCT + RAVE + 휴리스틱 사전지식) ---------- */
-  var PRIOR_N = 10, EXPL = 0.2, RAVE_B = 1 / 2000;
+  function simWinner(g, p, sim, komi, own) {
+    var sc = areaScore(g, p.cells, komi, own);
+    if (sim.winner) return sim.winner;
+    if (sim.target && sim.caps[1] !== sim.caps[2]) return sim.caps[1] > sim.caps[2] ? 1 : 2;
+    return sc > 0 ? 1 : 2;
+  }
+
+  /* ---------- MCTS (UCT + RAVE + 사전지식) ---------- */
+  var PRIOR_N = 10, EXPL = 0.2, RAVE_B = 1 / 3000;
   function Node(move, color) {
     this.move = move; this.color = color; this.children = null;
     this.N = 0; this.W = 0; this.pN = 0; this.pW = 0; this.v = 0; this.rN = 0; this.rW = 0;
   }
-  function expand(g, p, node, last, moveNum) {
-    var moves = genMoves(g, p), me = p.toPlay, ch = [];
+  function expand(g, p, node, last, moveNum, capMode) {
+    var moves = genMoves(g, p), me = p.toPlay, ch = [], pn = capMode ? 30 : PRIOR_N;
     for (var i = 0; i < moves.length; i++) {
-      var c = new Node(moves[i], me), e = evalMove(g, p, moves[i], last, moveNum);
+      var c = new Node(moves[i], me), e = evalMove(g, p, moves[i], last, moveNum, capMode);
       var q = 0.5 + e * 0.05; if (q < 0.05) q = 0.05; if (q > 0.95) q = 0.95;
-      c.N = c.pN = PRIOR_N; c.W = c.pW = PRIOR_N * q; ch.push(c);
+      c.N = c.pN = pn; c.W = c.pW = pn * q; ch.push(c);
     }
     if (!ch.length) { var pc = new Node(-1, me); pc.N = pc.pN = 1; pc.W = pc.pW = 0.5; ch.push(pc); }
     node.children = ch;
@@ -420,27 +548,28 @@ var Go = (function () {
     }
     return best;
   }
+
+  /* 한 워커 분량의 탐색. 루트 자식들의 실제 방문/승 통계를 돌려준다 */
   function search(g, pos, o) {
     var size = g.size, root = new Node(-2, 3 - pos.toPlay), own = new Float64Array(size);
-    var firstCol = new Int8Array(size), firstIdx = new Int32Array(size), path = [];
-    expand(g, pos, root, o.last, o.moveNum);
-    var t0 = Date.now(), sims = 0, maxMoves = size * 3;
-    while (true) {
+    var sim = new Sim(size), path = [], capMode = o.target > 0, caps = o.caps || [0, 0, 0];
+    expand(g, pos, root, o.last, o.moveNum, capMode);
+    var t0 = Date.now(), sims = 0, maxMoves = size * 3, maxSims = o.maxSims || 1e9;
+    while (sims < maxSims) {
       if ((sims & 7) === 0 && Date.now() - t0 >= o.timeMs) break;
       var p = pos.clone(), node = root, idx = 0, last = o.last, passes = o.oppPassed ? 1 : 0;
-      firstCol.fill(0); path.length = 0; path.push(root);
-      while (passes < 2) {
-        if (!node.children) { if (node.v < 1) break; expand(g, p, node, last, o.moveNum + idx); }
+      sim.reset(caps, o.target || 0);
+      path.length = 0; path.push(root);
+      while (passes < 2 && !sim.winner) {
+        if (!node.children) { if (node.v < 1) break; expand(g, p, node, last, o.moveNum + idx, capMode); }
         var c = select(node);
-        if (c.move >= 0) {
-          play(g, p, c.move);
-          if (!firstCol[c.move]) { firstCol[c.move] = c.color; firstIdx[c.move] = idx; }
-          passes = 0;
-        } else { play(g, p, -1); passes++; }
+        simPlay(g, p, sim, c.move, idx);
+        passes = c.move >= 0 ? 0 : passes + 1;
         last = c.move; idx++; node = c; path.push(c);
       }
-      if (passes < 2) playout(g, p, firstCol, firstIdx, idx, last, passes, maxMoves);
-      var winner = areaScore(g, p.cells, o.komi, own) > 0 ? 1 : 2;
+      if (passes < 2 && !sim.winner) playout(g, p, sim, idx, last, passes, maxMoves);
+      var winner = simWinner(g, p, sim, o.komi, own);
+      var firstCol = sim.firstCol, firstIdx = sim.firstIdx;
       for (var i = path.length - 1; i >= 0; i--) {
         var nd = path[i]; nd.N++; nd.v++; if (nd.color === winner) nd.W++;
         if (nd.children) {
@@ -454,14 +583,15 @@ var Go = (function () {
       sims++;
     }
     if (sims) for (var k = 0; k < size; k++) own[k] /= sims;
-    return { root: root, own: own, sims: sims };
+    var stats = root.children.map(function (c) { return [c.move, c.N - c.pN, c.W - c.pW]; });
+    return { stats: stats, own: Array.from(own), sims: sims };
   }
 
   function estimate(g, pos, komi, count, timeMs) {
-    var own = new Float64Array(g.size), fc = new Int8Array(g.size), fi = new Int32Array(g.size);
-    var t0 = Date.now(), k = 0;
+    var own = new Float64Array(g.size), sim = new Sim(g.size), t0 = Date.now(), k = 0;
     while (k < count && (k < 8 || Date.now() - t0 < timeMs)) {
-      var p = pos.clone(); playout(g, p, fc, fi, 0, -1, 0, g.size * 3);
+      var p = pos.clone(); sim.reset([0, 0, 0], 0);
+      playout(g, p, sim, 0, -1, 0, g.size * 3);
       areaScore(g, p.cells, komi, own); k++;
     }
     for (var i = 0; i < g.size; i++) own[i] /= k || 1;
@@ -474,70 +604,104 @@ var Go = (function () {
     for (var k = 0; k < nb.length; k++) if (own[nb[k]] * sg < 0.9) return false;
     return true;
   }
-  function bestEval(g, pos, cands, req, noise) {
-    var best = cands[0], bv = -1e9;
-    for (var i = 0; i < cands.length; i++) {
-      var v = evalMove(g, pos, cands[i], req.last, req.moveNum) + Math.random() * noise;
-      if (v > bv) { bv = v; best = cands[i]; }
+
+  function reqPos(req) {
+    var pos = new Pos(req.n);
+    pos.cells.set(req.cells); pos.ko = req.ko == null ? -1 : req.ko; pos.toPlay = req.toPlay || 1;
+    return pos;
+  }
+
+  /* 따내기: 지금 바로 목표에 도달하는 수 (없으면 -1) */
+  function winningCapture(g, pos, caps, target) {
+    var me = pos.toPlay, need = target - caps[me], cells = pos.cells, op = 3 - me, best = -1, bestCap = 0;
+    for (var pt = 0; pt < g.size; pt++) {
+      if (cells[pt] !== 0) continue;
+      var nb = g.nb[pt], near = false;
+      for (var k = 0; k < nb.length; k++) if (cells[nb[k]] === op) { near = true; break; }
+      if (!near || !isLegal(g, pos, pt)) continue;
+      var p = pos.clone(), c = play(g, p, pt);
+      if (c >= need && c > bestCap) { best = pt; bestCap = c; }
     }
     return best;
   }
+  /* 이 수를 두면 상대가 바로 목표에 도달하는지 */
+  function losesNow(g, pos, pt, caps, target) {
+    var me = pos.toPlay, p = pos.clone(), c = play(g, p, pt);
+    if (c < 0) return true;
+    var cc = caps.slice(); cc[me] += c;
+    if (cc[me] >= target) return false;
+    return winningCapture(g, p, cc, target) >= 0;
+  }
 
-  var TIMES = { hard: { 9: 1200, 13: 1800, 19: 2500 }, vhard: { 9: 4000, 13: 6000, 19: 8000 } };
+  /* 여러 워커의 탐색 결과를 합쳐 최종 수를 고른다 */
+  function finish(req, parts) {
+    var g = geom(req.n), size = g.size, me = req.toPlay, sign = me === 1 ? 1 : -1;
+    var capMode = req.target > 0, caps = req.caps || [0, 0, 0];
+    var tot = {}, own = new Float64Array(size), sims = 0;
+    parts.forEach(function (r) {
+      sims += r.sims;
+      for (var i = 0; i < size; i++) own[i] += r.own[i] * r.sims;
+      r.stats.forEach(function (s) {
+        var t = tot[s[0]] || (tot[s[0]] = { move: s[0], n: 0, w: 0 });
+        t.n += s[1]; t.w += s[2];
+      });
+    });
+    if (sims) for (var k = 0; k < size; k++) own[k] /= sims;
+    var list = Object.keys(tot).map(function (key) { return tot[key]; });
+    if (!list.length || (list.length === 1 && list[0].move < 0)) return { move: -1, sims: sims };
+    var late = !capMode && (req.oppPassed || req.moveNum > size * 0.4);
 
-  function decide(req) {
-    var n = req.n, g = geom(n), pos = new Pos(n);
-    pos.cells.set(req.cells); pos.ko = req.ko; pos.toPlay = req.toPlay;
-    var me = pos.toPlay, sign = me === 1 ? 1 : -1, size = g.size, komi = req.komi;
-    var moves = genMoves(g, pos);
-    if (!moves.length) return { move: -1 };
-    var late = req.oppPassed || req.moveNum > size * 0.4;
-
-    if (req.level === 'easy' || req.level === 'normal') {
-      var cands = moves;
-      if (late) {
-        var own0 = estimate(g, pos, komi, size <= 81 ? 200 : 120, req.timeMs || 700);
-        if (req.oppPassed && ownScore(own0, komi) * sign > 0) return { move: -1 };
-        cands = moves.filter(function (pt) { return !settled(g, own0, pt); });
-        if (!cands.length) return { move: -1 };
-      }
-      if (req.level === 'easy') {
-        if (Math.random() < 0.3) return { move: bestEval(g, pos, cands, req, 0.5) };
-        var pool = cands.filter(function (pt) { return g.line[pt] > 1 && !selfAtari(g, pos, pt, 2); });
-        var arr = pool.length ? pool : cands;
-        return { move: arr[(Math.random() * arr.length) | 0] };
-      }
-      return { move: bestEval(g, pos, cands, req, 1.2) };
+    if (req.oppPassed) {
+      var winning = capMode && caps[me] !== caps[3 - me] ? caps[me] > caps[3 - me] : ownScore(own, req.komi) * sign > 0;
+      if (winning) return { move: -1, sims: sims };
     }
-
-    var tm = req.timeMs || (TIMES[req.level] && TIMES[req.level][n]) || 3000;
-    var r = search(g, pos, { timeMs: tm, komi: komi, last: req.last, oppPassed: req.oppPassed, moveNum: req.moveNum });
-    var own = r.own;
-    if (req.oppPassed && ownScore(own, komi) * sign > 0) return { move: -1, sims: r.sims };
-    var ch = r.root.children.slice().sort(function (a, b) { return (b.N - b.pN) - (a.N - a.pN); });
-    var pick = null;
-    for (var i = 0; i < ch.length; i++) {
-      if (ch[i].move < 0) break;
-      if (late && settled(g, own, ch[i].move)) continue;
-      pick = ch[i]; break;
+    list.sort(function (a, b) { return b.n - a.n; });
+    var pick = null, pos = capMode ? reqPos(req) : null;
+    if (capMode) {
+      var win = winningCapture(g, pos, caps, req.target);
+      if (win >= 0) return { move: win, winrate: 1, sims: sims };
     }
-    if (!pick) return { move: -1, sims: r.sims };
-    var real = pick.N - pick.pN, wr = real > 0 ? (pick.W - pick.pW) / real : 0.5;
-    if (wr < 0.05 && real >= 300 && req.moveNum > size * 0.3) return { resign: true, move: -1, winrate: wr, sims: r.sims };
-    return { move: pick.move, winrate: wr, sims: r.sims };
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].move < 0) continue;
+      if (late && settled(g, own, list[i].move)) continue;
+      if (capMode && i < 40 && losesNow(g, pos, list[i].move, caps, req.target)) continue;
+      pick = list[i]; break;
+    }
+    if (!pick && capMode) for (i = 0; i < list.length; i++) if (list[i].move >= 0) { pick = list[i]; break; }
+    if (!pick) return { move: -1, sims: sims };
+    var wr = pick.n > 0 ? pick.w / pick.n : 0.5;
+    if (wr < 0.04 && pick.n >= 500 && req.moveNum > size * 0.3) return { resign: true, move: -1, winrate: wr, sims: sims };
+    return { move: pick.move, winrate: wr, sims: sims };
   }
 
   function handle(req) {
+    var g = geom(req.n), pos = reqPos(req);
     if (req.type === 'own') {
-      var g = geom(req.n), pos = new Pos(req.n);
-      pos.cells.set(req.cells); pos.toPlay = req.toPlay || 1;
       return { own: Array.from(estimate(g, pos, req.komi, req.count || 400, req.timeMs || 1500)) };
     }
-    return decide(req);
+    if (!genMoves(g, pos).length) return { stats: [], own: new Array(g.size).fill(0), sims: 0 };
+    return search(g, pos, { timeMs: req.timeMs || 3000, maxSims: req.maxSims, komi: req.komi, last: req.last,
+                            oppPassed: req.oppPassed, moveNum: req.moveNum, target: req.target || 0, caps: req.caps });
   }
 
-  return { geom: geom, Pos: Pos, play: play, legality: legality, isLegal: isLegal,
-           groupInfo: groupInfo, genMoves: genMoves, handle: handle };
+  /* 난이도: 시뮬레이션 수(sims, 판 크기별)와 최대 시간(ms), 병렬 워커 사용 여부 */
+  var LEVELS = {
+    easy:   { sims: { 9: 6000,  13: 5000,  19: 4000 },  time: { 9: 2500,  13: 3000,  19: 3500 },  parallel: false },
+    normal: { sims: { 9: 24000, 13: 18000, 19: 14000 }, time: { 9: 4000,  13: 6000,  19: 8000 },  parallel: true },
+    hard:   { sims: { 9: 80000, 13: 60000, 19: 45000 }, time: { 9: 6000,  13: 8000,  19: 10000 }, parallel: true },
+    vhard:  { sims: { 9: 1e9,   13: 1e9,   19: 1e9 },   time: { 9: 10000, 13: 12000, 19: 15000 }, parallel: true }
+  };
+
+  /* 동기식 한 번에 계산 (워커가 없을 때) */
+  function decide(req) {
+    var lv = LEVELS[req.level] || LEVELS.normal, r = Object.assign({}, req);
+    if (r.maxSims == null) r.maxSims = lv.sims[req.n] || 10000;
+    if (r.timeMs == null) r.timeMs = lv.time[req.n] || 4000;
+    return finish(req, [handle(r)]);
+  }
+
+  return { geom: geom, Pos: Pos, play: play, legality: legality, isLegal: isLegal, groupInfo: groupInfo,
+           genMoves: genMoves, handle: handle, finish: finish, decide: decide, LEVELS: LEVELS };
 })();
 </script>
 
@@ -551,7 +715,7 @@ var Go = (function () {
   var CNAME = { 1: '흑', 2: '백' };
   var LETTERS = 'ABCDEFGHJKLMNOPQRST';
 
-  var cfg = { mode: 'ai', level: 'normal', human: 1, n: 19, komi: 6.5, coords: true,
+  var cfg = { rule: 'territory', target: 5, mode: 'ai', level: 'normal', human: 1, n: 9, komi: 6.5, coords: true,
               confirm: window.matchMedia && matchMedia('(pointer: coarse)').matches };
   try { Object.assign(cfg, JSON.parse(localStorage.getItem('baduk-cfg') || '{}')); } catch (e) {}
   function saveCfg() { try { localStorage.setItem('baduk-cfg', JSON.stringify(cfg)); } catch (e) {} }
@@ -559,54 +723,85 @@ var Go = (function () {
   var S = null, geo = null, reqId = 0, hover = -1, pending = -1;
   var W = 0, cell = 0, margin = 0;
 
-  /* ---------- 엔진 실행 (Web Worker, 실패 시 메인 스레드) ---------- */
-  var worker = null, workerOk = typeof Worker !== 'undefined', cbs = {};
+  /* ---------- 엔진 실행 (Web Worker 여러 개로 병렬 탐색, 실패 시 메인 스레드) ---------- */
+  var POOL_MAX = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+  var pool = [], workerOk = typeof Worker !== 'undefined', cbs = {}, msgSeq = 0, workerUrl = null;
   var WORKER_MAIN = 'self.onmessage=function(e){var r;try{r=Go.handle(e.data);}catch(err){r={error:String(err)};}self.postMessage({id:e.data.id,res:r});};';
-  function getWorker() {
-    if (!workerOk) return null;
-    if (worker) return worker;
+  function killPool() {
+    pool.forEach(function (w) { w.terminate(); });
+    pool = [];
+    var pend = cbs; cbs = {};
+    return pend;
+  }
+  function makeWorker() {
     try {
-      var src = $('engine').textContent + '\n' + WORKER_MAIN;
-      var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-      worker = new Worker(url);
-      worker.onmessage = function (e) {
+      if (!workerUrl) {
+        var src = $('engine').textContent + '\n' + WORKER_MAIN;
+        workerUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      }
+      var w = new Worker(workerUrl);
+      w.onmessage = function (e) {
         var cb = cbs[e.data.id]; delete cbs[e.data.id];
         if (cb) cb(e.data.res);
       };
-      worker.onerror = function (e) {
+      w.onerror = function (e) {
         if (e && e.preventDefault) e.preventDefault();
-        workerOk = false; worker = null;
-        var pend = cbs; cbs = {};
-        for (var k in pend) pend[k].fallback();
+        workerOk = false;
+        var pend = killPool();
+        for (var k in pend) pend[k](null);
       };
-      return worker;
+      return w;
     } catch (e) { workerOk = false; return null; }
   }
-  function runEngine(req, cb) {
-    var fallback = function () { setTimeout(function () { cb(Go.handle(req)); }, 30); };
-    var wrapped = function (res) { if (!res || res.error) fallback(); else cb(res); };
-    wrapped.fallback = fallback;
-    var w = getWorker();
-    if (!w) { fallback(); return; }
-    cbs[req.id] = wrapped; w.postMessage(req);
+  function getPool(k) {
+    while (workerOk && pool.length < k) { var w = makeWorker(); if (!w) break; pool.push(w); }
+    return workerOk ? pool.slice(0, k) : [];
+  }
+  /* req 를 k 개 워커에 나눠 보내고, 결과 배열을 cb 로 돌려준다 */
+  function runParallel(req, k, cb) {
+    var ws = getPool(k);
+    if (!ws.length) { setTimeout(function () { cb([Go.handle(req)]); }, 30); return; }
+    var parts = [], left = ws.length;
+    ws.forEach(function (w) {
+      var id = ++msgSeq;
+      cbs[id] = function (res) {
+        if (res && !res.error) parts.push(res);
+        if (--left === 0) cb(parts.length ? parts : [Go.handle(req)]);
+      };
+      w.postMessage(Object.assign({}, req, { id: id }));
+    });
   }
   function cancelAI() {
     reqId++;
     if (S) S.thinking = false;
-    if (worker && Object.keys(cbs).length) { worker.terminate(); worker = null; cbs = {}; }
+    if (Object.keys(cbs).length) killPool();
   }
 
   /* ---------- 게임 상태 ---------- */
-  function newGame() {
+  function newGame(hold) {
     cancelAI();
     geo = Go.geom(cfg.n);
     S = { n: cfg.n, pos: new Go.Pos(cfg.n), caps: [0, 0, 0], last: -1, passes: 0, moveNum: 0,
           history: [], over: false, scoring: false, scoreBusy: false, dead: new Set(),
-          territory: null, result: null, thinking: false, winrate: null };
+          territory: null, result: null, thinking: false, winrate: null, hold: !!hold };
     pending = -1; hover = -1;
     $('scorePanel').hidden = true;
     resize(); updateUI();
     maybeAI();
+  }
+  function aiTag(color) { return cfg.mode === 'ai' ? (color === cfg.human ? '(나)' : '(AI)') : ''; }
+  function winText(winner, why) {
+    var t = CNAME[winner] + ' ' + why;
+    if (cfg.mode === 'ai') t += winner === cfg.human ? ' — 당신의 승리! 🎉' : ' — AI 승리';
+    else t += ' — ' + CNAME[winner] + ' 승리!';
+    return t;
+  }
+  /* 따내기: 목표 도달 시 즉시 승리 */
+  function checkCaptureWin(color) {
+    if (cfg.rule !== 'capture' || S.caps[color] < cfg.target) return false;
+    S.over = true;
+    S.result = winText(color, S.caps[color] + '개 따냄');
+    return true;
   }
   function snapshot() {
     return { cells: S.pos.cells.slice(), ko: S.pos.ko, toPlay: S.pos.toPlay, caps: S.caps.slice(),
@@ -616,7 +811,7 @@ var Go = (function () {
     S.pos.cells.set(s.cells); S.pos.ko = s.ko; S.pos.toPlay = s.toPlay; S.caps = s.caps;
     S.last = s.last; S.passes = s.passes; S.moveNum = s.moveNum;
   }
-  function isAITurn() { return cfg.mode === 'ai' && S && !S.over && !S.scoring && S.pos.toPlay !== cfg.human; }
+  function isAITurn() { return cfg.mode === 'ai' && S && !S.hold && !S.over && !S.scoring && S.pos.toPlay !== cfg.human; }
 
   function tryMove(pt, quiet) {
     var why = Go.legality(geo, S.pos, pt);
@@ -628,13 +823,22 @@ var Go = (function () {
     S.history.push(snapshot());
     var me = S.pos.toPlay, cap = Go.play(geo, S.pos, pt);
     S.caps[me] += cap; S.last = pt; S.passes = 0; S.moveNum++;
+    checkCaptureWin(me);
     return true;
   }
   function doPass() {
     S.history.push(snapshot());
     var who = S.pos.toPlay;
     Go.play(geo, S.pos, -1); S.passes++; S.last = -1; S.moveNum++;
-    if (S.passes >= 2) { enterScoring(); return true; }
+    if (S.passes >= 2) {
+      if (cfg.rule === 'capture' && S.caps[1] !== S.caps[2]) {
+        var w = S.caps[1] > S.caps[2] ? 1 : 2;
+        S.over = true; S.result = winText(w, '따낸 돌 ' + S.caps[w] + ' : ' + S.caps[3 - w]);
+        updateUI(); draw(); return true;
+      }
+      if (cfg.rule === 'capture') toast('따낸 돌이 같아서 집으로 승부를 가려요.');
+      enterScoring(); return true;
+    }
     toast(CNAME[who] + (cfg.mode === 'ai' && who !== cfg.human ? '(AI)' : '') + '이 패스했어요.');
     return false;
   }
@@ -650,10 +854,14 @@ var Go = (function () {
     if (!isAITurn()) return;
     S.thinking = true; updateUI();
     var id = ++reqId, started = Date.now();
-    var req = { type: 'move', id: id, n: S.n, cells: S.pos.cells.slice(), ko: S.pos.ko, toPlay: S.pos.toPlay,
-                level: cfg.level, last: S.last, oppPassed: S.passes === 1, komi: cfg.komi, moveNum: S.moveNum };
-    runEngine(req, function (res) {
+    var lv = Go.LEVELS[cfg.level] || Go.LEVELS.normal, k = lv.parallel && cfg.rule !== 'capture' ? POOL_MAX : 1;
+    var req = { type: 'move', level: cfg.level, n: S.n, cells: S.pos.cells.slice(), ko: S.pos.ko, toPlay: S.pos.toPlay,
+                last: S.last, oppPassed: S.passes === 1, komi: cfg.komi, moveNum: S.moveNum,
+                target: cfg.rule === 'capture' ? cfg.target : 0, caps: S.caps.slice(),
+                timeMs: lv.time[S.n], maxSims: Math.ceil(lv.sims[S.n] / k) };
+    runParallel(req, k, function (parts) {
       if (id !== reqId) return;
+      var res = Go.finish(req, parts);
       var wait = Math.max(0, 350 - (Date.now() - started));
       setTimeout(function () {
         if (id !== reqId) return;
@@ -702,8 +910,9 @@ var Go = (function () {
     $('scorePanel').hidden = false; $('scoreText').textContent = '사석 판정 중…';
     updateUI(); draw();
     var id = ++reqId;
-    runEngine({ type: 'own', id: id, n: S.n, cells: S.pos.cells.slice(), toPlay: S.pos.toPlay,
-                komi: cfg.komi, count: 400, timeMs: 1500 }, function (res) {
+    runParallel({ type: 'own', n: S.n, cells: S.pos.cells.slice(), toPlay: S.pos.toPlay,
+                  komi: cfg.komi, count: 400, timeMs: 1500 }, 1, function (parts) {
+      var res = parts[0];
       if (id !== reqId || !S.scoring) return;
       S.scoreBusy = false;
       markDead(res.own); computeScore(); updateUI(); draw();
@@ -758,9 +967,7 @@ var Go = (function () {
     if (!S.score || S.scoreBusy) return;
     var diff = S.score.black - S.score.white, winner = diff > 0 ? 1 : 2, margin2 = Math.abs(diff);
     S.scoring = false; S.over = true;
-    var who = CNAME[winner] + ' ' + margin2 + '집 승';
-    if (cfg.mode === 'ai') who += winner === cfg.human ? ' — 당신의 승리! 🎉' : ' — AI 승리';
-    S.result = who;
+    S.result = winText(winner, margin2 + '집 승');
     $('scorePanel').hidden = true;
     updateUI(); draw();
   }
@@ -772,11 +979,13 @@ var Go = (function () {
   /* ---------- 화면 ---------- */
   function updateUI() {
     if (!S) return;
-    var ai = cfg.mode === 'ai';
-    $('modeLabel').textContent = ai ? 'AI 대국 · ' + LEVEL[cfg.level] + ' · ' + S.n + '줄' : '2인 대전 · ' + S.n + '줄';
-    $('nameB').textContent = '흑' + (ai ? (cfg.human === 1 ? ' (나)' : ' (AI)') : '');
-    $('nameW').textContent = '백' + (ai ? (cfg.human === 2 ? ' (나)' : ' (AI)') : '');
+    var ai = cfg.mode === 'ai', cap = cfg.rule === 'capture';
+    var ruleTxt = cap ? '따내기 ' + cfg.target + '개' : '집짓기';
+    $('modeLabel').textContent = ruleTxt + ' · ' + (ai ? 'AI ' + LEVEL[cfg.level] : '2인 대전') + ' · ' + S.n + '줄';
+    $('nameB').textContent = '흑 ' + aiTag(1);
+    $('nameW').textContent = '백 ' + aiTag(2);
     $('capB').textContent = S.caps[1]; $('capW').textContent = S.caps[2];
+    $('tgtB').textContent = $('tgtW').textContent = cap ? ' / ' + cfg.target : '';
     var active = !S.over && !S.scoring;
     $('pB').classList.toggle('active', active && S.pos.toPlay === 1);
     $('pW').classList.toggle('active', active && S.pos.toPlay === 2);
@@ -925,10 +1134,16 @@ var Go = (function () {
 
   var dlg = $('dlg'), form = $('cfgForm');
   function syncDlg() {
-    var pvp = form.mode.value === 'pvp';
+    var pvp = form.mode.value === 'pvp', cap = form.rule.value === 'capture';
     form.querySelectorAll('#fLevel input, #fColor input').forEach(function (el) { el.disabled = pvp; });
+    $('fTarget').hidden = !cap;
+    $('fKomi').hidden = cap;
+    $('ruleHint').textContent = cap
+      ? '상대 돌을 목표 개수만큼 먼저 따내면 이겨요. 수읽기 연습에 좋아요.'
+      : '정식 바둑. 둘 다 패스하면 집과 따낸 돌을 세서 승부를 가려요.';
   }
   function openSettings() {
+    form.rule.value = cfg.rule; form.capTarget.value = String(cfg.target);
     form.mode.value = cfg.mode; form.level.value = cfg.level; form.human.value = String(cfg.human);
     form.n.value = String(cfg.n); form.komi.value = String(cfg.komi);
     form.coords.checked = cfg.coords; form.confirm.checked = cfg.confirm;
@@ -937,7 +1152,11 @@ var Go = (function () {
   }
   form.addEventListener('change', syncDlg);
   dlg.addEventListener('close', function () {
-    if (dlg.returnValue !== 'ok') return;
+    if (dlg.returnValue !== 'ok') {
+      if (S && S.hold) { S.hold = false; updateUI(); maybeAI(); }
+      return;
+    }
+    cfg.rule = form.rule.value; cfg.target = +form.capTarget.value;
     cfg.mode = form.mode.value; cfg.level = form.level.value; cfg.human = +form.human.value;
     cfg.n = +form.n.value; cfg.komi = +form.komi.value;
     cfg.coords = form.coords.checked; cfg.confirm = form.confirm.checked;
@@ -947,7 +1166,8 @@ var Go = (function () {
   $('btnNew').onclick = openSettings;
 
   window.addEventListener('resize', function () { resize(); });
-  newGame();
+  newGame(true);
+  openSettings();
 })();
 </script>
 </body>
